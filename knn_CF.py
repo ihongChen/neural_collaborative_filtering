@@ -7,6 +7,7 @@ Created on Fri Aug 18 14:03:18 2017
 import scipy.sparse as sp
 import numpy as np 
 from scipy.sparse import csr_matrix
+from sklearn.preprocessing import normalize
 
 #A = csr_matrix([[4,1, 2, 0], [0,0, 0, 3], [0,4, 0, 5]])
 #A.transpose().dot(A)
@@ -23,7 +24,7 @@ def jaccard_similarities(mat):
     rows_sum = mat.getnnz(axis=1)  # 
     ab = mat.dot(mat.T) # mat x t(mat)
 
-    # for rows
+    # for rows= to just = for your 2 sparse arrays:
     aa = np.repeat(rows_sum, ab.getnnz(axis=1))
     # for columns
     bb = rows_sum[ab.indices]
@@ -52,12 +53,19 @@ def knn(sim,n):
     return sim_topn
         
 def ratings(sim,ui_trans,topn):
-    sim_topn = knn(sim,topn)    
+    sim_topn = knn(sim,topn)
     r_mat = sim_topn.dot(ui_trans)
-    r_norm = r_mat/r_mat.sum(axis=1)
+#    r_norm = r_mat/r_mat.sum(axis=1)
+    r_norm = normalize(r_mat, norm='l1', axis=1)
+    r_norm = r_norm.tolil()
+    rows, cols = ui_trans.nonzero()
+    r_norm[rows,cols] = 0 # exclude purchased ratings
+#    r_norm[ui_trans.indices] = 0  # wrong
+    r_norm = r_norm.tocsr()
     return r_norm
     
     
+
     
 #arr = np.array([[0,5,3,0,2],[6,0,4,9,0],[0,0,0,6,8]])
 #arr_sp = sp.csc_matrix(arr)
@@ -72,11 +80,12 @@ def ratings(sim,ui_trans,topn):
     
 # %%
 
-mat = sp.rand(3000, 1000, 0.01, format='csc')
+mat = sp.rand(3000, 1000, 0.01, format='csr')
+#mat_lil = mat.tolil()
 mat.data[:] = 1 # binarize
 #mat.toarray()
 sim = jaccard_similarities(mat)
 
 # %%
 r = ratings(sim,mat,20)
-        
+# %%
