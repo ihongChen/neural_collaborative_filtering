@@ -52,21 +52,24 @@ def knn(sim,n):
         sim_topn.rows[i] = r.tolist()
     return sim_topn
         
-def ratings(sim,ui_trans,topn):
-    sim_topn = knn(sim,topn)
+def ratings(sim,ui_trans,topn,nn=100):
+    ''' '''
+    sim_topn = knn(sim,nn)
     r_mat = sim_topn.dot(ui_trans)
 #    r_norm = r_mat/r_mat.sum(axis=1)
-    r_norm = normalize(r_mat, norm='l1', axis=1)
-    r_norm = r_norm.tolil()
+#    r_norm = normalize(r_mat.astype('float64'), norm='l1', axis=1)
+    r_mat = r_mat.tolil()
     rows, cols = ui_trans.nonzero()
-    r_norm[rows,cols] = 0 # exclude purchased ratings
+    r_mat[rows,cols] = 0 # exclude purchased ratings
 #    r_norm[ui_trans.indices] = 0  # wrong
+    r_mat = r_mat.tocsr()
+    r_mat = knn(r_mat,topn)
+    r_norm = normalize(r_mat.astype('float64'),norm='l1',axis=1)
     r_norm = r_norm.tocsr()
     return r_norm
     
     
 
-    
 #arr = np.array([[0,5,3,0,2],[6,0,4,9,0],[0,0,0,6,8]])
 #arr_sp = sp.csc_matrix(arr)
 #arr_ll = arr_sp.tolil()
@@ -89,3 +92,5 @@ sim = jaccard_similarities(mat)
 # %%
 r = ratings(sim,mat,20)
 # %%
+for index,v in testRatings[0:100]:
+    print(v in r[index,].nonzero()[1])
