@@ -6,6 +6,7 @@ Created on Fri Aug 18 14:03:18 2017
 """
 import scipy.sparse as sp
 import numpy as np 
+import math, heapq
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
@@ -83,14 +84,78 @@ def ratings(sim,ui_trans,topn,nn=100):
     
 # %%
 
-mat = sp.rand(3000, 1000, 0.01, format='csr')
+#mat = sp.rand(3000, 1000, 0.01, format='csr')
 #mat_lil = mat.tolil()
-mat.data[:] = 1 # binarize
+#mat.data[:] = 1 # binarize
 #mat.toarray()
-sim = jaccard_similarities(mat)
+#sim = jaccard_similarities(mat)
 
 # %%
-r = ratings(sim,mat,20)
+#r = ratings(sim,mat,20)
+from Dataset import Dataset
+data = Dataset('./data/ml-1m')
+trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
 # %%
-for index,v in testRatings[0:100]:
-    print(v in r[index,].nonzero()[1])
+sim = jaccard_similarities(trainMatrix.tocsr())
+r = ratings(sim,trainMatrix,topn = 10, nn = 100)
+# %%
+score = 0
+for index,v in testRatings:
+    if (v in r[index,].nonzero()[1]):
+        score += 1
+#    print(index, v in r[index,].nonzero()[1], score)
+#    print("score:" % score)
+
+
+# %% 
+def eval_one_rating(rating_csrMatrix,testRatings,testNegatives,idx):
+    _K = len(rating_csrMatrix[0,].data) # topK reccomendation 
+    rating = testRatings[idx]
+    items = testNegatives[idx]
+    u = rating[0]
+    gtItem = rating[1]
+    items.append(gtItem)
+    # Get prediction scores
+    map_item_score = {}
+    # users = np.full(len(items), u, dtype = 'int32')
+    predictions = np.zeros(len(items),dtype='int32')
+    for ii,e in enumerate(items):
+        predictions[ii] = (e in rating_csrMatrix[idx,].nonzero()[1])
+        
+    for i in range(len(items)):
+        item = items[i]
+        map_item_score[item] = predictions[i]
+    items.pop()
+    
+    # Evaluate top rank list
+    ranklist = heapq.nlargest(_K, map_item_score, key=map_item_score.get)
+    hr = getHitRatio(ranklist, gtItem)
+    ndcg = getNDCG(ranklist, gtItem)
+    return (hr, ndcg)
+
+def getHitRatio(ranklist, gtItem):
+    for item in ranklist:
+        if item == gtItem:
+            return 1
+    return 0
+
+def getNDCG(ranklist, gtItem):
+    for i in range(len(ranklist)):
+        item = ranklist[i]
+        if item == gtItem:
+            return math.log(2) / math.log(i+2)
+    return 0
+
+# %%
+#from scipy.io import mmread
+#
+#rb_t = mmread('./data/fund_use.txt') ## read sparse 
+#rb_coo = rb_t.transpose()
+#rb_csr = rb_coo.tocsr()
+#rb_csr[1,]
+hits, ndcgs = [],[]
+for idx in range(len(testRatings)):
+    (hr,ndcg) = eval_one_rating(r,testRatings,testNegatives,idx)
+    hits.append(hr)
+    ndcgs.append(ndcg)      ## only 8.9 % recall .... too bad ...algo wrong?
+
