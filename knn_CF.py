@@ -9,7 +9,7 @@ import numpy as np
 import math, heapq
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
-
+from itertools import compress
 #A = csr_matrix([[4,1, 2, 0], [0,0, 0, 3], [0,4, 0, 5]])
 #A.transpose().dot(A)
 
@@ -24,8 +24,8 @@ def jaccard_similarities(mat):
     '''
     rows_sum = mat.getnnz(axis=1)  # 
     ab = mat.dot(mat.T) # mat x t(mat)
-
-    # for rows= to just = for your 2 sparse arrays:
+    ab = ab.astype('float32')
+    # for rows
     aa = np.repeat(rows_sum, ab.getnnz(axis=1))
     # for columns
     bb = rows_sum[ab.indices]
@@ -53,16 +53,19 @@ def knn(sim,n):
         sim_topn.rows[i] = r.tolist()
     return sim_topn
         
-def ratings(sim,ui_trans,topn,nn=100):
+def ratings(sim,ui_trans,topn,nn=100,method='user'):
     ''' '''
     sim_topn = knn(sim,nn)
-    r_mat = sim_topn.dot(ui_trans)
-#    r_norm = r_mat/r_mat.sum(axis=1)
-#    r_norm = normalize(r_mat.astype('float64'), norm='l1', axis=1)
+    
+    if method == 'user':
+        r_mat = sim_topn.dot(ui_trans)
+    elif method == 'item': 
+        r_mat = ui_trans.dot(sim_topn) 
+                
     r_mat = r_mat.tolil()
     rows, cols = ui_trans.nonzero()
     r_mat[rows,cols] = 0 # exclude purchased ratings
-#    r_norm[ui_trans.indices] = 0  # wrong
+
     r_mat = r_mat.tocsr()
     r_mat = knn(r_mat,topn)
     r_norm = normalize(r_mat.astype('float64'),norm='l1',axis=1)
@@ -71,25 +74,23 @@ def ratings(sim,ui_trans,topn,nn=100):
     
     
 
-#arr = np.array([[0,5,3,0,2],[6,0,4,9,0],[0,0,0,6,8]])
-#arr_sp = sp.csc_matrix(arr)
-#arr_ll = arr_sp.tolil()
-#for i in range(arr_ll.shape[0]):
-#     d,r=max_n(np.array(arr_ll.data[i]),
-#               np.array(arr_ll.rows[i]),2)[:2]
-#     arr_ll.data[i] = d.tolist()
-#     arr_ll.rows[i] = r.tolist()
-
 
     
 # %%
+def popularity_guess(ui_trans,topn=10,popular_n=500):
+    ## time comsuming
+    scores_items = ui_trans.astype('int32').sum(axis=0)
+    popular_list = scores_items.argsort()[0,-popular_n:].tolist()[0]
 
-#mat = sp.rand(3000, 1000, 0.01, format='csr')
-#mat_lil = mat.tolil()
-#mat.data[:] = 1 # binarize
-#mat.toarray()
-#sim = jaccard_similarities(mat)
-
+    popular_array = np.zeros((ui_trans.shape[0],topn),dtype=int)
+    
+    for user in range(ui_trans.shape[0]):
+        nz_idx = ui_trans[user,].nonzero()[1]
+        bool_pop = [e not in nz_idx for e in popular_list]        
+        popular_array[user,] = list(compress(popular_list,bool_pop))[-topn:]
+#        print(user)
+    return popular_array
+    
 # %%
 #r = ratings(sim,mat,20)
 from Dataset import Dataset
@@ -97,14 +98,27 @@ data = Dataset('./data/ml-1m')
 trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
 # %%
 sim = jaccard_similarities(trainMatrix.tocsr())
-r = ratings(sim,trainMatrix,topn = 10, nn = 100)
+r_user = ratings(sim,trainMatrix.astype('int32'),topn = 10, nn = 100, method = 'user')
 # %%
-score = 0
+sim_item = jaccard_similarities(trainMatrix.transpose().tocsr())
+r_item = ratings(sim_item,trainMatrix.astype('int32'),topn=10,nn=100,method='item')
+# %%
+pop_a = popularity_guess(trainMatrix,topn=10,popular_n=200)
+# %%
+score_ubcf = 0; score_ibcf = 0;score_pop = 0
 for index,v in testRatings:
-    if (v in r[index,].nonzero()[1]):
-        score += 1
-#    print(index, v in r[index,].nonzero()[1], score)
-#    print("score:" % score)
+    if (v in r_user[index,].nonzero()[1]):
+        score_ubcf += 1
+    elif (v in r_item[index,].nonzero()[1]):
+        score_ibcf += 1
+    elif (v in pop_a[index,]):
+        score_pop += 1
+        
+recall_ubcf = score_ubcf/len(testRatings) * 100 # 7.8 %
+recall_ibcf = score_ibcf/len(testRatings) * 100 # 2.9 %
+recall_pop = score_pop /len(testRatings) * 100  # 1.4 %
+print("ubcf recall: {0:.1f}% ,\nibcf recall: {1:.1f}% ,\npopular recall: {2:.1f}%".format(recall_ubcf,recall_ibcf,recall_pop))
+
 
 
 # %% 
@@ -146,8 +160,9 @@ def getNDCG(ranklist, gtItem):
             return math.log(2) / math.log(i+2)
     return 0
 
+    
 # %%
-#from scipy.io import mmread
+from scipy.io import mmread
 #
 #rb_t = mmread('./data/fund_use.txt') ## read sparse 
 #rb_coo = rb_t.transpose()
@@ -155,7 +170,7 @@ def getNDCG(ranklist, gtItem):
 #rb_csr[1,]
 hits, ndcgs = [],[]
 for idx in range(len(testRatings)):
-    (hr,ndcg) = eval_one_rating(r,testRatings,testNegatives,idx)
+    (hr,ndcg) = eval_one_rating(r_item,testRatings,testNegatives,idx)
     hits.append(hr)
-    ndcgs.append(ndcg)      ## only 8.9 % recall .... too bad ...algo wrong?
+    ndcgs.append(ndcg)      ## ubcf - 19.4 %, ibcf - 17.9% .... too bad ...algo wrong?,
 
