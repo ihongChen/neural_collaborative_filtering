@@ -103,20 +103,20 @@ r_user = ratings(sim,trainMatrix.astype('int32'),topn = 10, nn = 100, method = '
 sim_item = jaccard_similarities(trainMatrix.transpose().tocsr())
 r_item = ratings(sim_item,trainMatrix.astype('int32'),topn=10,nn=100,method='item')
 # %%
-pop_a = popularity_guess(trainMatrix,topn=10,popular_n=200)
+pop_a = popularity_guess(trainMatrix,topn=10,popular_n=500)
 # %%
 score_ubcf = 0; score_ibcf = 0;score_pop = 0
 for index,v in testRatings:
     if (v in r_user[index,].nonzero()[1]):
         score_ubcf += 1
-    elif (v in r_item[index,].nonzero()[1]):
-        score_ibcf += 1
-    elif (v in pop_a[index,]):
+    if (v in r_item[index,].nonzero()[1]):
+        score_ibcf += 1        
+    if (v in pop_a[index,]):
         score_pop += 1
         
-recall_ubcf = score_ubcf/len(testRatings) * 100 # 7.8 %
-recall_ibcf = score_ibcf/len(testRatings) * 100 # 2.9 %
-recall_pop = score_pop /len(testRatings) * 100  # 1.4 %
+recall_ubcf = score_ubcf/len(testRatings) * 100 # 8.7 %
+recall_ibcf = score_ibcf/len(testRatings) * 100 # 7.1 %
+recall_pop = score_pop /len(testRatings) * 100  # 4.1 %
 print("ubcf recall: {0:.1f}% ,\nibcf recall: {1:.1f}% ,\npopular recall: {2:.1f}%".format(recall_ubcf,recall_ibcf,recall_pop))
 
 
@@ -125,7 +125,7 @@ print("ubcf recall: {0:.1f}% ,\nibcf recall: {1:.1f}% ,\npopular recall: {2:.1f}
 def eval_one_rating(rating_csrMatrix,testRatings,testNegatives,idx):
     _K = len(rating_csrMatrix[0,].data) # topK reccomendation 
     rating = testRatings[idx]
-    items = testNegatives[idx]
+    items = testNegatives[idx] 
     u = rating[0]
     gtItem = rating[1]
     items.append(gtItem)
@@ -142,7 +142,11 @@ def eval_one_rating(rating_csrMatrix,testRatings,testNegatives,idx):
     items.pop()
     
     # Evaluate top rank list
-    ranklist = heapq.nlargest(_K, map_item_score, key=map_item_score.get)
+    ranklist = []
+    for k_item_idx,v in map_item_score.items():
+        if v>0:
+            ranklist.append(k_item_idx)
+#    ranklist = heapq.nlargest(_K, map_item_score, key=map_item_score.get)
     hr = getHitRatio(ranklist, gtItem)
     ndcg = getNDCG(ranklist, gtItem)
     return (hr, ndcg)
@@ -168,9 +172,17 @@ from scipy.io import mmread
 #rb_coo = rb_t.transpose()
 #rb_csr = rb_coo.tocsr()
 #rb_csr[1,]
-hits, ndcgs = [],[]
+hits_u, ndcgs_u = [],[]
+hits_i, ndcgs_i = [],[]
 for idx in range(len(testRatings)):
-    (hr,ndcg) = eval_one_rating(r_item,testRatings,testNegatives,idx)
-    hits.append(hr)
-    ndcgs.append(ndcg)      ## ubcf - 19.4 %, ibcf - 17.9% .... too bad ...algo wrong?,
+    (hr_u,ndcg_u) = eval_one_rating(r_user,testRatings,testNegatives,idx)
+    (hr_i,ndcg_i) = eval_one_rating(r_item,testRatings,testNegatives,idx)
+    hits_u.append(hr_u)
+    hits_i.append(hr_i)
+    ndcgs_i.append(ndcg_i)
+    ndcgs_u.append(ndcg_u)      ## ubcf - 8.7% , ibcf - 7.1 % .... too bad ...algo wrong?,
 
+hits_u_arr = np.array(hits_u)*100
+hits_i_arr = np.array(hits_i)*100
+print('HR_ubcf :{0:.1f}%,\nHR_ibcf: {1:.1f}%'
+      .format(hits_u_arr.mean(),hits_i_arr.mean()))
