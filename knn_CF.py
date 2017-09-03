@@ -10,8 +10,7 @@ import math, heapq
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 from itertools import compress
-#A = csr_matrix([[4,1, 2, 0], [0,0, 0, 3], [0,4, 0, 5]])
-#A.transpose().dot(A)
+
 
 def jaccard_similarities(mat):
     '''
@@ -91,35 +90,6 @@ def popularity_guess(ui_trans,topn=10,popular_n=500):
 #        print(user)
     return popular_array
     
-# %%
-#r = ratings(sim,mat,20)
-from Dataset import Dataset
-data = Dataset('./data/ml-1m')
-trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
-# %%
-sim = jaccard_similarities(trainMatrix.tocsr())
-r_user = ratings(sim,trainMatrix.astype('int32'),topn = 10, nn = 100, method = 'user')
-# %%
-sim_item = jaccard_similarities(trainMatrix.transpose().tocsr())
-r_item = ratings(sim_item,trainMatrix.astype('int32'),topn=10,nn=100,method='item')
-# %%
-pop_a = popularity_guess(trainMatrix,topn=10,popular_n=500)
-# %%
-score_ubcf = 0; score_ibcf = 0;score_pop = 0
-for index,v in testRatings:
-    if (v in r_user[index,].nonzero()[1]):
-        score_ubcf += 1
-    if (v in r_item[index,].nonzero()[1]):
-        score_ibcf += 1        
-    if (v in pop_a[index,]):
-        score_pop += 1
-        
-recall_ubcf = score_ubcf/len(testRatings) * 100 # 8.7 %
-recall_ibcf = score_ibcf/len(testRatings) * 100 # 7.1 %
-recall_pop = score_pop /len(testRatings) * 100  # 4.1 %
-print("ubcf recall: {0:.1f}% ,\nibcf recall: {1:.1f}% ,\npopular recall: {2:.1f}%".format(recall_ubcf,recall_ibcf,recall_pop))
-
-
 
 # %% 
 def eval_one_rating(rating_csrMatrix,testRatings,testNegatives,idx):
@@ -164,14 +134,50 @@ def getNDCG(ranklist, gtItem):
             return math.log(2) / math.log(i+2)
     return 0
 
+def getTestRating(data):
+    users = data.shape[1]
+    testRating = []
+    data_copy = data.copy()
+    for user_idx in range(users):
+        items_cand = data[user_idx,].nonzero()[1]
+        testItem = np.random.choice(items_cand)
+        testRating.append([user_idx,testItem])
+        # remove selected test data        
+        data_copy[user_idx,testItem] = 0
+        
+    data_copy = data_copy.astype('int32')
     
+    return testRating,data_copy
+
 # %%
-from scipy.io import mmread
-#
-#rb_t = mmread('./data/fund_use.txt') ## read sparse 
-#rb_coo = rb_t.transpose()
-#rb_csr = rb_coo.tocsr()
-#rb_csr[1,]
+#r = ratings(sim,mat,20)
+from Dataset import Dataset
+data = Dataset('./data/ml-1m')
+trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
+# %%
+sim = jaccard_similarities(trainMatrix.tocsr())
+r_user = ratings(sim,trainMatrix.astype('int32'),topn = 10, nn = 100, method = 'user')
+# %%
+sim_item = jaccard_similarities(trainMatrix.transpose().tocsr())
+r_item = ratings(sim_item,trainMatrix.astype('int32'),topn=10,nn=100,method='item')
+# %%
+pop_a = popularity_guess(trainMatrix,topn=10,popular_n=500)
+# %%
+score_ubcf = 0; score_ibcf = 0;score_pop = 0
+for index,v in testRatings:
+    if (v in r_user[index,].nonzero()[1]):
+        score_ubcf += 1
+    if (v in r_item[index,].nonzero()[1]):
+        score_ibcf += 1        
+    if (v in pop_a[index,]):
+        score_pop += 1
+        
+recall_ubcf = score_ubcf/len(testRatings) * 100 # 8.7 %
+recall_ibcf = score_ibcf/len(testRatings) * 100 # 7.1 %
+recall_pop = score_pop /len(testRatings) * 100  # 4.1 %
+print("ubcf recall: {0:.1f}% ,\nibcf recall: {1:.1f}% ,\npopular recall: {2:.1f}%".format(recall_ubcf,recall_ibcf,recall_pop))
+
+
 hits_u, ndcgs_u = [],[]
 hits_i, ndcgs_i = [],[]
 for idx in range(len(testRatings)):
@@ -186,3 +192,41 @@ hits_u_arr = np.array(hits_u)*100
 hits_i_arr = np.array(hits_i)*100
 print('HR_ubcf :{0:.1f}%,\nHR_ibcf: {1:.1f}%'
       .format(hits_u_arr.mean(),hits_i_arr.mean()))
+
+
+# %%
+from scipy.io import mmread
+#
+rb_t = mmread('./data/fund_use.txt') ## read sparse 
+rb_coo = rb_t.transpose()
+rb_csr = rb_coo.tocsr()
+#rb_csr[1,]
+testR,rb_train = getTestRating(rb_csr)
+
+pop_rb = popularity_guess(rb_train,topn=10,popular_n=50)
+
+## ubcf 
+sim_u = jaccard_similarities(rb_train)
+
+r_user = ratings(sim_u,rb_train.astype('int32'),
+                 topn = 10, nn = 100, method = 'user')
+
+# ibcf 
+sim_i = jaccard_similarities(rb_train.transpose())
+r_item = ratings(sim_i,rb_train.astype('int32'),
+                 topn = 10, nn = 100, method = 'item')
+score_ubcf = 0; score_ibcf = 0;score_pop = 0
+for index,v in testR:
+    if (v in r_user[index,].nonzero()[1]):
+        score_ubcf += 1
+    if (v in r_item[index,].nonzero()[1]):
+        score_ibcf += 1        
+    if (v in pop_rb[index,]):
+        score_pop += 1
+
+recall_pop = score_pop/len(testR)*100
+recall_ubcf = score_ubcf / len(testR) * 100
+recall_ibcf = score_ibcf / len(testR) * 100
+print("popular recall: {:.1f}%".format(recall_pop)) # 20.3%
+print("ibcf recall: {:.1f}%".format(recall_ibcf)) #23.5 %
+print("ubcf recall : {:.1f}%".format(recall_ubcf)) # 30.0 %
