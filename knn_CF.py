@@ -6,7 +6,7 @@ Created on Fri Aug 18 14:03:18 2017
 """
 import scipy.sparse as sp
 import numpy as np 
-import math, heapq
+import math
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 from itertools import compress
@@ -35,6 +35,10 @@ def jaccard_similarities(mat):
 
     return similarities
 
+   
+    
+    
+    
 # %%
 
 def max_n(row_data, row_indices, n):
@@ -135,7 +139,7 @@ def getNDCG(ranklist, gtItem):
     return 0
 
 def getTestRating(data):
-    users = data.shape[1]
+    users = data.shape[0]
     testRating = []
     data_copy = data.copy()
     for user_idx in range(users):
@@ -148,6 +152,8 @@ def getTestRating(data):
     data_copy = data_copy.astype('int32')
     
     return testRating,data_copy
+
+    
 
 # %%
 #r = ratings(sim,mat,20)
@@ -197,24 +203,25 @@ print('HR_ubcf :{0:.1f}%,\nHR_ibcf: {1:.1f}%'
 # %%
 from scipy.io import mmread
 #
+np.random.seed(1)
 rb_t = mmread('./data/fund_use.txt') ## read sparse 
 rb_coo = rb_t.transpose()
 rb_csr = rb_coo.tocsr()
 #rb_csr[1,]
 testR,rb_train = getTestRating(rb_csr)
 
-pop_rb = popularity_guess(rb_train,topn=10,popular_n=50)
+pop_rb = popularity_guess(rb_train,topn=10,popular_n=200)
 
 ## ubcf 
 sim_u = jaccard_similarities(rb_train)
 
 r_user = ratings(sim_u,rb_train.astype('int32'),
-                 topn = 10, nn = 100, method = 'user')
+                 topn = 10, nn = 200, method = 'user')
 
 # ibcf 
 sim_i = jaccard_similarities(rb_train.transpose())
 r_item = ratings(sim_i,rb_train.astype('int32'),
-                 topn = 10, nn = 100, method = 'item')
+                 topn = 10, nn = 200, method = 'item')
 score_ubcf = 0; score_ibcf = 0;score_pop = 0
 for index,v in testR:
     if (v in r_user[index,].nonzero()[1]):
@@ -227,6 +234,8 @@ for index,v in testR:
 recall_pop = score_pop/len(testR)*100
 recall_ubcf = score_ubcf / len(testR) * 100
 recall_ibcf = score_ibcf / len(testR) * 100
+print("ubcf recall : {:.1f}%".format(recall_ubcf)) # 25.0 %
+print("ibcf recall: {:.1f}%".format(recall_ibcf)) #22.1 %
 print("popular recall: {:.1f}%".format(recall_pop)) # 20.3%
-print("ibcf recall: {:.1f}%".format(recall_ibcf)) #23.5 %
-print("ubcf recall : {:.1f}%".format(recall_ubcf)) # 30.0 %
+
+
