@@ -11,7 +11,7 @@ from evaluate import evaluate_model
 from keras.optimizers import RMSprop, Adam, Adagrad
 from keras.regularizers import l2
 from keras.models import Sequential, Model
-from keras.layers import concatenate
+from keras.layers import concatenate, multiply
 from keras.layers import Input, Embedding, Flatten, merge, Dense
 from scipy.sparse import csr_matrix, dok_matrix
 import heapq
@@ -22,8 +22,58 @@ trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, da
 num_users, num_items = data.num_users, data.num_items
 
 
+# %% build NeuMF model (neural matrix factorize)
+def get_NeuMF_model(num_users, num_items, mf_dim=10, layers=[10], reg_layers=[0], reg_mf=0):
+    assert len(layers) == len(reg_layers)
+    num_layer = len(layers) #Number of layers in the MLP
+    # Input variables
+    user_input = Input(shape=(1,), dtype='int32', name = 'user_input')
+    item_input = Input(shape=(1,), dtype='int32', name = 'item_input')
+    
+    # Embedding layer
+    MF_Embedding_User = Embedding(input_dim = num_users, output_dim = mf_dim, name = 'mf_embedding_user',
+                                  embeddings_initializer = 'uniform', embeddings_regularizer = l2(reg_mf), input_length=1)
+    MF_Embedding_Item = Embedding(input_dim = num_items, output_dim = mf_dim, name = 'mf_embedding_item',
+                                  embeddings_initializer = 'uniform', embeddings_regularizer = l2(reg_mf), input_length=1)   
 
-# %% 
+    MLP_Embedding_User = Embedding(input_dim = num_users, output_dim = layers[0]//2, name = "mlp_embedding_user",
+                                  embeddings_initializer = 'uniform', embeddings_regularizer = l2(reg_layers[0]), input_length=1)
+    MLP_Embedding_Item = Embedding(input_dim = num_items, output_dim = layers[0]//2, name = 'mlp_embedding_item',
+                                  embeddings_initializer = 'uniform', embeddings_regularizer = l2(reg_layers[0]), input_length=1)   
+    
+    # MF part
+    mf_user_latent = Flatten()(MF_Embedding_User(user_input))
+    mf_item_latent = Flatten()(MF_Embedding_Item(item_input))
+#    mf_vector = merge([mf_user_latent, mf_item_latent], mode = 'mul') # element-wise multiply
+    mf_vector = multiply([mf_user_latent, mf_item_latent])
+    # MLP part 
+    mlp_user_latent = Flatten()(MLP_Embedding_User(user_input))
+    mlp_item_latent = Flatten()(MLP_Embedding_Item(item_input))
+#    mlp_vector = merge([mlp_user_latent, mlp_item_latent], mode = 'concat')
+    mlp_vector = concatenate([mlp_user_latent, mlp_item_latent])
+    for idx in range(1, num_layer):
+        layer = Dense(layers[idx], 
+                      kernel_regularizer= l2(reg_layers[idx]), 
+                      activation='relu', 
+                      name="layer%d" %idx)
+        mlp_vector = layer(mlp_vector)
+
+    # Concatenate MF and MLP parts
+    #mf_vector = Lambda(lambda x: x * alpha)(mf_vector)
+    #mlp_vector = Lambda(lambda x : x * (1-alpha))(mlp_vector)
+#    predict_vector = merge([mf_vector, mlp_vector], mode = 'concat')
+    predict_vector = concatenate([mf_vector, mlp_vector])
+    
+    # Final prediction layer
+    prediction = Dense(1, activation='sigmoid',
+                       kernel_initializer='lecun_uniform',
+                       name = "prediction")(predict_vector)
+    
+    model = Model(inputs=[user_input, item_input], 
+                  outputs=prediction)
+    
+    return model
+# %% build MLP model 
 def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
     assert len(layers) == len(reg_layers)
     num_layer = len(layers) #Number of layers in the MLP
@@ -190,10 +240,23 @@ num_negatives = 100;
 learning_rate = 0.001
 layers = [64,32,16,8]
 reg_layers = [0,0,0,0]
-model = get_model(num_users = num_users,
-                  num_items = num_items, 
-                  layers= layers,
-                  reg_layers= reg_layers)
+# =============================================================================
+# MLP
+# =============================================================================
+#
+#model = get_model(num_users = num_users,
+#                  num_items = num_items, 
+#                  layers= layers,
+#                  reg_layers= reg_layers)
+# =============================================================================
+# NeuMF
+# =============================================================================
+
+model = get_NeuMF_model(num_users=num_users,
+                        num_items=num_items,
+                        layers=layers,
+                        reg_layers=reg_layers,
+                        reg_mf=0)
 
 #model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
 model.compile(optimizer=Adam(lr=learning_rate), loss='binary_crossentropy')
