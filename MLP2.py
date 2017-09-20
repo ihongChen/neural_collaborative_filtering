@@ -21,6 +21,42 @@ data = Dataset('./data/ml-1m')
 trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
 num_users, num_items = data.num_users, data.num_items
 
+# %% build MLP model 
+def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
+    assert len(layers) == len(reg_layers)
+    num_layer = len(layers) #Number of layers in the MLP
+    # Input variables
+    user_input = Input(shape=(1,), dtype='int32', name = 'user_input')
+    item_input = Input(shape=(1,), dtype='int32', name = 'item_input')
+
+    MLP_Embedding_User = Embedding(input_dim = num_users, output_dim = layers[0]//2, name = 'user_embedding',
+                                  embeddings_initializer= 'uniform', embeddings_regularizer = l2(reg_layers[0]), input_length=1)
+    MLP_Embedding_Item = Embedding(input_dim = num_items, output_dim = layers[0]//2, name = 'item_embedding',
+                                  embeddings_initializer= 'uniform', embeddings_regularizer = l2(reg_layers[0]), input_length=1)   
+    
+    # Crucial to flatten an embedding vector!
+    user_latent = Flatten()(MLP_Embedding_User(user_input))
+    item_latent = Flatten()(MLP_Embedding_Item(item_input))
+    
+    # The 0-th layer is the concatenation of embedding layers
+    vector = concatenate([user_latent, item_latent])
+    
+    # MLP layers
+    for idx in range(1, num_layer):
+        layer = Dense(layers[idx], kernel_regularizer= l2(reg_layers[idx]),
+                      activation='relu', 
+                      name = 'layer%d' %idx)
+        vector = layer(vector)
+        
+    # Final prediction layer
+    prediction = Dense(1, activation='sigmoid', 
+                       kernel_initializer='lecun_uniform',
+                       name = 'prediction')(vector)
+    
+    model = Model(inputs=[user_input, item_input], 
+                  outputs=prediction)
+    
+    return model
 
 # %% build NeuMF model (neural matrix factorize)
 def get_NeuMF_model(num_users, num_items, mf_dim=10, layers=[10], reg_layers=[0], reg_mf=0):
@@ -73,39 +109,86 @@ def get_NeuMF_model(num_users, num_items, mf_dim=10, layers=[10], reg_layers=[0]
                   outputs=prediction)
     
     return model
-# %% build MLP model 
-def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
+
+# %%
+    
+def get_NeuMF_features_model(num_users,                              
+                             num_items, 
+                             num_users_features,
+                             num_items_features,
+                             mf_dim=10, layers=[10],                             
+                             reg_layers=[0], reg_mf=0):
+    ''' '''
     assert len(layers) == len(reg_layers)
+    # modified MLP layers with num_features (user + items)
+    layers[0] = layers[0] + num_users_features + num_items_features
+    
+    #
     num_layer = len(layers) #Number of layers in the MLP
     # Input variables
     user_input = Input(shape=(1,), dtype='int32', name = 'user_input')
     item_input = Input(shape=(1,), dtype='int32', name = 'item_input')
+    # Features variables 
+    user_features = Input(shape=(num_users_features,), dtype='float32',name ='user_features')
+    item_features = Input(shape=(num_items_features,), dtype='float32',name = 'item_features')
+#    user_feature = Input(shape=)
+    # Embedding layer
+    MF_Embedding_User = Embedding(input_dim = num_users, 
+                                  output_dim = mf_dim, 
+                                  name = 'mf_embedding_user',
+                                  embeddings_initializer = 'uniform', 
+                                  embeddings_regularizer = l2(reg_mf), 
+                                  input_length=1)
+    
+    MF_Embedding_Item = Embedding(input_dim = num_items, 
+                                  output_dim = mf_dim, 
+                                  name = 'mf_embedding_item',
+                                  embeddings_initializer = 'uniform', 
+                                  embeddings_regularizer = l2(reg_mf), 
+                                  input_length=1)   
 
-    MLP_Embedding_User = Embedding(input_dim = num_users, output_dim = layers[0]//2, name = 'user_embedding',
-                                  embeddings_initializer= 'uniform', embeddings_regularizer = l2(reg_layers[0]), input_length=1)
-    MLP_Embedding_Item = Embedding(input_dim = num_items, output_dim = layers[0]//2, name = 'item_embedding',
-                                  embeddings_initializer= 'uniform', embeddings_regularizer = l2(reg_layers[0]), input_length=1)   
+    MLP_Embedding_User = Embedding(input_dim = num_users, 
+                                   output_dim = layers[0]//2, 
+                                   name = "mlp_embedding_user",
+                                   embeddings_initializer = 'uniform', 
+                                   embeddings_regularizer = l2(reg_layers[0]), 
+                                   input_length=1)
+    MLP_Embedding_Item = Embedding(input_dim = num_items, 
+                                   output_dim = layers[0]//2, 
+                                   name = 'mlp_embedding_item',
+                                   embeddings_initializer = 'uniform', 
+                                   embeddings_regularizer = l2(reg_layers[0]), 
+                                   input_length=1)   
     
-    # Crucial to flatten an embedding vector!
-    user_latent = Flatten()(MLP_Embedding_User(user_input))
-    item_latent = Flatten()(MLP_Embedding_Item(item_input))
-    
-    # The 0-th layer is the concatenation of embedding layers
-    vector = concatenate([user_latent, item_latent])
-    
-    # MLP layers
+    # MF part
+    mf_user_latent = Flatten()(MF_Embedding_User(user_input))
+    mf_item_latent = Flatten()(MF_Embedding_Item(item_input))
+#    mf_vector = merge([mf_user_latent, mf_item_latent], mode = 'mul') # element-wise multiply
+    mf_vector = multiply([mf_user_latent, mf_item_latent])
+    # MLP part 
+    mlp_user_latent = Flatten()(MLP_Embedding_User(user_input))
+    mlp_item_latent = Flatten()(MLP_Embedding_Item(item_input))
+#    mlp_vector = merge([mlp_user_latent, mlp_item_latent], mode = 'concat')
+    mlp_vector = concatenate([mlp_user_latent,user_features, mlp_item_latent,item_features])
     for idx in range(1, num_layer):
-        layer = Dense(layers[idx], kernel_regularizer= l2(reg_layers[idx]),
+        layer = Dense(layers[idx], 
+                      kernel_regularizer= l2(reg_layers[idx]), 
                       activation='relu', 
-                      name = 'layer%d' %idx)
-        vector = layer(vector)
-        
-    # Final prediction layer
-    prediction = Dense(1, activation='sigmoid', 
-                       kernel_initializer='lecun_uniform',
-                       name = 'prediction')(vector)
+                      name="layer%d" %idx)
+        mlp_vector = layer(mlp_vector)
+
+    # Concatenate MF and MLP parts
+    #mf_vector = Lambda(lambda x: x * alpha)(mf_vector)
+    #mlp_vector = Lambda(lambda x : x * (1-alpha))(mlp_vector)
+#    predict_vector = merge([mf_vector, mlp_vector], mode = 'concat')
+    predict_vector = concatenate([mf_vector, mlp_vector])
     
-    model = Model(inputs=[user_input, item_input], 
+    # Final prediction layer
+    prediction = Dense(1, activation='sigmoid',
+                       kernel_initializer='lecun_uniform',
+                       name = "prediction")(predict_vector)
+    
+    model = Model(inputs=[user_input,user_features, item_input,item_features], 
                   outputs=prediction)
     
     return model
@@ -169,6 +252,7 @@ def getTestNegative(data,num_neg=100):
     return testNegative
 
 def evaluate_recall(model,testRatings,testNegatives,topK=10):
+    ''' recall w.r.t Negative samplings '''
     testNeg_arr = np.array(testNegatives) # numpy negative array 
     testPos_arr = np.array(testRatings)
     test_u = testPos_arr[:,0]
@@ -196,7 +280,53 @@ def evaluate_recall(model,testRatings,testNegatives,topK=10):
             score += 1
     return score/num_user
 
+
+def evaluate_recall_features(model,testRatings,testNegatives,
+                             user_features,item_features,
+                             topK=10):
+    ''' recall w.r.t Negative samplings and features '''
+    testNeg_arr = np.array(testNegatives) # numpy negative array 
+    testPos_arr = np.array(testRatings)
+    test_u = testPos_arr[:,0]
+    test_i = testPos_arr[:,1]
+    
+    (num_user, num_neg_item) = testNeg_arr.shape
+    testResult = np.zeros((num_user,num_neg_item + 1))
+    testResult[:,-1] = 1
+    
+    
+    test_i.shape = (num_user,1)
+    testItem_arr = np.hstack((testNeg_arr,test_i))
+        
+    testUser_arr = np.repeat(test_u,num_neg_item+1) 
+    testUser_arr.shape = (num_user , num_neg_item+1)
+    score = 0
+    
+    if type(user_features)==int and user_features ==0:
+        user_features = np.array([]); 
+        user_features.shape = (num_user,0)
+    elif type(item_features)==int and item_features == 0:
+        item_features =np.array([])
+        item_features.shape = (num_user,0)
+        
+    for idx in range(num_user):        
+        map_item_pred = {}
+        item_features_idx = np.array([item_features[idx]] * (num_neg_item+1))
+        user_features_idx = np.array([user_features[idx]] * (num_neg_item+1))
+        pred_val = model.predict([testUser_arr[idx],
+                                  user_features_idx,
+                                  testItem_arr[idx],
+                                  item_features_idx
+                                  ])
+        for iidx ,item in enumerate(testItem_arr[idx]):
+            map_item_pred[item] = pred_val[iidx]
+        pred_topK = heapq.nlargest(topK,map_item_pred,key=map_item_pred.get)
+        if testItem_arr[idx,-1] in pred_topK:
+            score += 1
+    return score/num_user
+
 def evaluate_recall2(model,testRatings,trainData,topK=10):
+    '''recall w.r.t all datasets (not sampling) '''
     assert type(trainData) == dok_matrix,'trainData should be dok_matrix'
     
     num_user, num_item = trainData.shape
@@ -230,6 +360,9 @@ def evaluate_recall2(model,testRatings,trainData,topK=10):
     return score/num_user
 
 # %% test paper's data
+# =============================================================================
+# 測試論文 Movie Lens datasets 
+# =============================================================================
 np.random.seed(1)
 epochs = 20;
 batch_size = 256;
@@ -242,7 +375,6 @@ layers = [64,32,16,8]
 reg_layers = [0,0,0,0]
 # =============================================================================
 # MLP
-# =============================================================================
 #
 #model = get_model(num_users = num_users,
 #                  num_items = num_items, 
@@ -250,7 +382,7 @@ reg_layers = [0,0,0,0]
 #                  reg_layers= reg_layers)
 # =============================================================================
 # NeuMF
-# =============================================================================
+
 
 model = get_NeuMF_model(num_users=num_users,
                         num_items=num_items,
@@ -302,43 +434,56 @@ for epoch in range(epochs):
 
 
 # %%%  test bsp data
-#
-#
-#from scipy.io import mmread    
-## import data # 
-#rb_t = mmread('./data/fund_use.txt') ## read sparse 
-#rb_coo = rb_t.transpose()
-#rb_csr = rb_coo.tocsr()
-#rb_dok = rb_csr.todok()
-##rb_csr[1,]
-#testR,rb_train = getTestRating(rb_csr)
-#testNeg = getTestNegative(rb_csr,num_neg=100)
-#
-#num_users,num_items = rb_csr.shape
-#
-#epochs = 20;
-#batch_size = 256;
-#topK = 10;
-#evaluation_threads = 1;
-#verbose = 1;
-#num_negatives = 4;
-#learning_rate = 0.001
-#layers = [64,32,16,8]
-#reg_layers = [0,0,0,0]
-#model = get_model(num_users = num_users,
-#                  num_items = num_items, 
-#                  layers= layers,
-#                  reg_layers= reg_layers)
-#
-##model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
-#model.compile(optimizer=Adam(lr=learning_rate), loss='binary_crossentropy')
-#
-#
-#t1 = time()
+# =============================================================================
+# Bank SinoPac data --- 基金推薦問題
+# =============================================================================
+
+from scipy.io import mmread    
+import pandas as pd 
+# import data # 
+rb_t = mmread('./data/fund_use.txt') ## read sparse matrix , transaction 
+rb_coo = rb_t.transpose()
+rb_csr = rb_coo.tocsr()
+rb_dok = rb_csr.todok() 
+
+# load features data (users +items )
+features_df = pd.read_csv('./data/features_used.csv',sep=',',dtype='int32')
+features_arr = features_df.values
+
+#rb_csr[1,]
+testR,rb_train = getTestRating(rb_csr)
+testNeg = getTestNegative(rb_csr,num_neg=100)
+
+num_users,num_items = rb_csr.shape
+
+epochs = 20;
+batch_size = 256;
+topK = 10;
+evaluation_threads = 1;
+verbose = 1;
+num_negatives = 4;
+learning_rate = 0.001
+layers = [64,32,16,8]
+reg_layers = [0,0,0,0]
+model_test = get_model(num_users = num_users,
+                  num_items = num_items, 
+                  layers= layers,
+                  reg_layers= reg_layers)
+
+model = get_NeuMF_features_model(num_users,num_items,num_users_features=7,
+                                 num_items_features=0,mf_dim=10,layers=layers,
+                                 reg_layers = reg_layers, reg_mf = 0)
+#model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
+model.compile(optimizer=Adam(lr=learning_rate), loss='binary_crossentropy')
+
+
+t1 = time()
+
+
 #(hits, ndcgs) = evaluate_model(model,testR, testNeg, topK, evaluation_threads)
-#
-##(hits, ndcgs) = evaluate_model(model, testR, testNeg, topK, evaluation_threads)
-#hr, ndcg = np.array(hits).mean(), np.array(ndcgs).mean()
+
+#(hits, ndcgs) = evaluate_model(model, testR, testNeg, topK, evaluation_threads)
+hr, ndcg = np.array(hits).mean(), np.array(ndcgs).mean()
 #
 #print('Init: HR = %.4f, NDCG = %.4f [%.1f]' %(hr, ndcg, time()-t1))
 #
