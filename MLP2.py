@@ -16,10 +16,6 @@ from keras.layers import Input, Embedding, Flatten, merge, Dense
 from scipy.sparse import csr_matrix, dok_matrix
 import heapq
 
-data = Dataset('./data/ml-1m')
-
-trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
-num_users, num_items = data.num_users, data.num_items
 
 # %% build MLP model 
 def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
@@ -163,13 +159,13 @@ def get_NeuMF_features_model(num_users,
     # MF part
     mf_user_latent = Flatten()(MF_Embedding_User(user_input))
     mf_item_latent = Flatten()(MF_Embedding_Item(item_input))
-#    mf_vector = merge([mf_user_latent, mf_item_latent], mode = 'mul') # element-wise multiply
-    mf_vector = multiply([mf_user_latent, mf_item_latent])
+
+    mf_vector = multiply([mf_user_latent, mf_item_latent]) # element-wise multiply
     # MLP part 
     mlp_user_latent = Flatten()(MLP_Embedding_User(user_input))
     mlp_item_latent = Flatten()(MLP_Embedding_Item(item_input))
-#    mlp_vector = merge([mlp_user_latent, mlp_item_latent], mode = 'concat')
-    mlp_vector = concatenate([mlp_user_latent,user_features, mlp_item_latent,item_features])
+    mlp_vector = concatenate([mlp_user_latent,mlp_item_latent])
+
     for idx in range(1, num_layer):
         layer = Dense(layers[idx], 
                       kernel_regularizer= l2(reg_layers[idx]), 
@@ -181,7 +177,7 @@ def get_NeuMF_features_model(num_users,
     #mf_vector = Lambda(lambda x: x * alpha)(mf_vector)
     #mlp_vector = Lambda(lambda x : x * (1-alpha))(mlp_vector)
 #    predict_vector = merge([mf_vector, mlp_vector], mode = 'concat')
-    predict_vector = concatenate([mf_vector, mlp_vector])
+    predict_vector = concatenate([mf_vector,mlp_vector,user_features,item_features])
     
     # Final prediction layer
     prediction = Dense(1, activation='sigmoid',
@@ -305,7 +301,7 @@ def evaluate_recall_features(model,testRatings,testNegatives,
     if type(user_features)==int and user_features ==0:
         user_features = np.array([]); 
         user_features.shape = (num_user,0)
-    elif type(item_features)==int and item_features == 0:
+    if type(item_features)==int and item_features == 0:
         item_features =np.array([])
         item_features.shape = (num_user,0)
         
@@ -363,6 +359,12 @@ def evaluate_recall2(model,testRatings,trainData,topK=10):
 # =============================================================================
 # 測試論文 Movie Lens datasets 
 # =============================================================================
+    
+data = Dataset('./data/ml-1m')
+
+trainMatrix, testRatings, testNegatives = data.trainMatrix, data.testRatings, data.testNegatives
+num_users, num_items = data.num_users, data.num_items
+
 np.random.seed(1)
 epochs = 20;
 batch_size = 256;
@@ -461,18 +463,20 @@ batch_size = 256;
 topK = 10;
 evaluation_threads = 1;
 verbose = 1;
-num_negatives = 4;
+num_negatives = 50;
 learning_rate = 0.001
 layers = [64,32,16,8]
+#reg_layers = [0.1,0.5,0.2,0.3]
 reg_layers = [0,0,0,0]
-model_test = get_model(num_users = num_users,
-                  num_items = num_items, 
-                  layers= layers,
-                  reg_layers= reg_layers)
-
-model = get_NeuMF_features_model(num_users,num_items,num_users_features=7,
-                                 num_items_features=0,mf_dim=10,layers=layers,
-                                 reg_layers = reg_layers, reg_mf = 0)
+#model = get_NeuMF_model(num_users = num_users,
+#                  num_items = num_items, 
+#                  layers= layers,
+#                  reg_layers= reg_layers) ## 愈train 愈爛!!! 
+model = get_model(num_users,num_items,layers, reg_layers)
+#
+#model = get_NeuMF_features_model(num_users,num_items,num_users_features=0,
+#                                 num_items_features=0,mf_dim=10,layers=layers,
+#                                 reg_layers = reg_layers, reg_mf = 0)
 #model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
 model.compile(optimizer=Adam(lr=learning_rate), loss='binary_crossentropy')
 
@@ -480,33 +484,71 @@ model.compile(optimizer=Adam(lr=learning_rate), loss='binary_crossentropy')
 t1 = time()
 
 
-#(hits, ndcgs) = evaluate_model(model,testR, testNeg, topK, evaluation_threads)
+#
+#recall = evaluate_recall_features(model = model,
+#                                  testRatings = testR,
+#                                  testNegatives = testNeg,
+#                                  user_features = 0,
+#                                  item_features = 0,
+#                                  topK = topK)
 
-#(hits, ndcgs) = evaluate_model(model, testR, testNeg, topK, evaluation_threads)
-hr, ndcg = np.array(hits).mean(), np.array(ndcgs).mean()
+recall = evaluate_recall(model,testR,testNeg,topK)
 #
-#print('Init: HR = %.4f, NDCG = %.4f [%.1f]' %(hr, ndcg, time()-t1))
+print('Init: Recall = %.4f [%.1f sec]' %(recall, time()-t1))
 #
-## Train model
-#best_hr, best_ndcg, best_iter = hr, ndcg, -1
-#for epoch in range(epochs):
-#    t1 = time()
-#    # Generate training instances
-#    user_input, item_input, labels = get_train_instances(rb_train, num_negatives)
-#
-#    # Training        
-#    hist = model.fit([np.array(user_input), np.array(item_input)], #input
-#                     np.array(labels), # labels 
-#                     batch_size=batch_size, epochs=1, verbose=0, shuffle=True)
-#    t2 = time()
-#    
-#    
-#    if epoch % verbose == 0:
-##        (hits, ndcgs) = evaluate_model(model, testR, testNeg, topK, evaluation_threads)
-##        hr, ndcg, loss = np.array(hits).mean(), np.array(ndcgs).mean(), hist.history['loss'][0]
-##        print('Iteration %d [%.1f s]: HR = %.4f, NDCG = %.4f, loss = %.4f [%.1f s]' 
-##              % (epoch,  t2-t1, hr, ndcg, loss, time()-t2))
-##        if hr > best_hr:
-##            best_hr, best_ndcg, best_iter = hr, ndcg, epoch
+# Train model
+
+best_recall, best_iter = recall,-1
+for epoch in range(epochs):
+    t1 = time()
+    # Generate training instances
+    user_input, item_input, labels = get_train_instances(rb_train, num_negatives)
+#    user_features = np.array([features_arr[user] for user in user_input])
+    user_features = np.array([],dtype='int32')
+    user_features.shape = (len(item_input),0)
+    item_features = np.array([],dtype='int32')
+    item_features.shape = (len(user_input),0)
+    # Training        
+    
+    hist = model.fit(
+            [
+                np.array(user_input),
+                np.array(item_input)
+            ],
+            np.array(labels),
+            batch_size = batch_size,
+            epochs = 1,
+            verbose = 0,
+            shuffle = True
+            )
+#    hist = model.fit(
+#            [
+#                np.array(user_input),
+#                user_features,
+#                np.array(item_input),
+#                item_features
+#            ], #input
+#            np.array(labels), # labels 
+#            batch_size=batch_size,
+#            epochs=1,
+#            verbose=0,
+#            shuffle=True)
+    t2 = time()
+    
+    
+    if epoch % verbose == 0:
+#        recall = evaluate_recall_features(model = model, 
+#                                          testRatings = testR,
+#                                          testNegatives = testNeg,
+#                                          user_features = 0,
+#                                          item_features = 0,
+#                                          topK = topK)
+        recall = evaluate_recall(model = model, 
+                                 testRatings = testR,
+                                 testNegatives = testNeg,
+                                 topK = topK)
+        loss = hist.history['loss'][0]
+        print('Iteration %d [%.1f s]: Recall = %.4f, loss = %.4f [%.1f s]' 
+              % (epoch,  t2-t1, recall, loss, time()-t2))
 
 
